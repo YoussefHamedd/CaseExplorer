@@ -18,6 +18,7 @@ RUN if [ $BUILD_PRODUCTION ]; then npm run build; fi
 
 COPY docker/Caddyfile /usr/src/app/Caddyfile
 COPY docker/frontend_start.sh /frontend_start.sh
+RUN chmod +x /frontend_start.sh
 
 EXPOSE 3000
 
