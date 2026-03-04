@@ -3,6 +3,10 @@
 		reverse_proxy api:5000
 	}
 
+	handle /graphql* {
+		reverse_proxy api:5000
+	}
+
 	handle_path /exports* {
 		root * /usr/src/app/exports
 		encode

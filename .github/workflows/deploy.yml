@@ -1,0 +1,28 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to Contabo VPS via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          password: ${{ secrets.VPS_PASSWORD }}
+          port: 22
+          script: |
+            set -e
+            cd /opt/casetools/CaseExplorer
+            git remote set-url origin https://github.com/YoussefHamedd/CaseExplorer.git
+            git fetch origin
+            git reset --hard origin/main
+            docker compose build --no-cache
+            docker compose down
+            docker compose up -d
+            echo "Deployed successfully at $(date)"

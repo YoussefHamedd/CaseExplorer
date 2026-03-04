@@ -49,4 +49,6 @@ include/
 .deploy-stack
 .push-docker-image
 cloudformation-output.yml
-secrets.json
+secrets.json.env
+.DS_Store
+node_modules/
