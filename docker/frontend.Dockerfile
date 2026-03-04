@@ -14,7 +14,9 @@ RUN npm install
 COPY src src
 COPY public public
 
-RUN if [ $BUILD_PRODUCTION ]; then npm run build; fi
+RUN if [ $BUILD_PRODUCTION ]; then npm run build && \
+    printf 'self.addEventListener("install",()=>self.skipWaiting());self.addEventListener("activate",e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.map(k=>caches.delete(k)))).then(()=>self.clients.claim()).then(()=>self.clients.matchAll()).then(cs=>cs.forEach(c=>c.navigate(c.url))))});' \
+    > /usr/src/app/build/service-worker.js; fi
 
 COPY docker/Caddyfile /usr/src/app/Caddyfile
 COPY docker/frontend_start.sh /frontend_start.sh
