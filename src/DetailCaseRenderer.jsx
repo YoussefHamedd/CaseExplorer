@@ -29,12 +29,19 @@ export default class DetailCellRenderer extends Component {
     this.state.masterGridApi.ensureIndexVisible(this.state.rowIndex, 'top');
 
     const case_number = this.state.masterRowData.case_number;
+    const detail_loc = this.state.masterRowData.detail_loc;
     const t =
       this.state.table === 'cases'
-        ? this.state.masterRowData.detail_loc.toLowerCase()
+        ? (detail_loc || '').toLowerCase()
         : this.state.table.indexOf('_') === -1
         ? this.state.table
         : this.state.table.substring(0, this.state.table.indexOf('_'));
+
+    if (!t || t === 'unknown') {
+      this.setState({ caseData: 'not_scraped' });
+      return;
+    }
+
     let promise,
       path = `/api/v1/${t}/${case_number}/full`;
     if (environment === 'amplify') {
@@ -50,6 +57,7 @@ export default class DetailCellRenderer extends Component {
       })
       .catch(error => {
         console.error(error);
+        this.setState({ caseData: 'error' });
       });
   }
 
@@ -121,6 +129,18 @@ export default class DetailCellRenderer extends Component {
               Loading...
             </span>
           </div>
+        </div>
+      );
+    } else if (this.state.caseData === 'not_scraped') {
+      return (
+        <div style={{ padding: '20px', color: '#555' }}>
+          Case details not yet available — this case has not been scraped.
+        </div>
+      );
+    } else if (this.state.caseData === 'error') {
+      return (
+        <div style={{ padding: '20px', color: '#c00' }}>
+          Failed to load case details. The case may not have been parsed yet.
         </div>
       );
     } else {
