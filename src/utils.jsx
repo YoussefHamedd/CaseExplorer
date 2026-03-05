@@ -33,6 +33,7 @@ export const getURLLastPart = () => {
 export const genSortedColumns = (metadata, table) => {
   let sortedColumns = [];
   const table_metadata = metadata[table];
+  if (!table_metadata) return sortedColumns;
   for (const [column, column_metadata] of Object.entries(table_metadata)) {
     if (sortedColumns.length === 0)
       sortedColumns.push({ name: column, metadata: column_metadata });
