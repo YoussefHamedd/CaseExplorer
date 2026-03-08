@@ -11,8 +11,6 @@ COPY server/app .
 
 EXPOSE 5000
 
-VOLUME /usr/src/app
-
 COPY docker/api_start.sh /api_start.sh
 RUN chmod +x /api_start.sh
 
