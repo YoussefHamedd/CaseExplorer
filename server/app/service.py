@@ -175,6 +175,10 @@ def fetch_rows_from_model(cls, req, eager=False, total_only=False):
 
     query = get_eager_query(cls) if eager else cls.query
 
+    # For the cases table, only show scraped cases
+    if table.name == 'cases' and 'last_scrape' in table.c:
+        query = query.filter(table.c['last_scrape'].isnot(None))
+
     # query = build_select(table, req)
     query = build_where(query, table, req)
     query = build_order_by(query, table, req)
