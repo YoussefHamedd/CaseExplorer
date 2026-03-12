@@ -11,7 +11,6 @@ import json
 
 admin_bp = Blueprint('admin', __name__, url_prefix='/api/v1/admin')
 
-# In-memory pipeline status (resets on server restart, good enough)
 _pipeline_status = {
     "running": False,
     "step": None,
@@ -20,6 +19,34 @@ _pipeline_status = {
     "last_start_date": None,
     "last_end_date": None,
 }
+
+# Always-on background thread: syncs host-side log/status into _pipeline_status
+def _start_background_poller():
+    import time
+    harvester_dir = os.environ.get('HARVESTER_DIR', '/opt/caseharvester')
+    log_file    = os.path.join(harvester_dir, 'ui_pipeline.log')
+    status_file = os.path.join(harvester_dir, 'ui_status.json')
+
+    while True:
+        try:
+            with open(status_file) as f:
+                st = json.load(f)
+            _pipeline_status["step"]    = st.get("step", _pipeline_status["step"])
+            _pipeline_status["running"] = bool(st.get("running", False))
+        except Exception:
+            pass
+
+        if _pipeline_status["running"]:
+            try:
+                with open(log_file) as f:
+                    lines = [l.rstrip() for l in f.readlines() if l.strip()]
+                _pipeline_status["log"] = lines[-200:]
+            except Exception:
+                pass
+
+        time.sleep(2)
+
+threading.Thread(target=_start_background_poller, daemon=True).start()
 
 SETTINGS_FILE = os.path.join(os.path.dirname(__file__), 'admin_settings.json')
 
@@ -43,41 +70,9 @@ def _log(msg):
         _pipeline_status["log"] = _pipeline_status["log"][-200:]
 
 
-def _poll_pipeline():
-    """Background thread: reads host-side log + status files and syncs into _pipeline_status."""
-    from datetime import datetime
-    harvester_dir = os.environ.get('HARVESTER_DIR', '/opt/caseharvester')
-    log_file    = os.path.join(harvester_dir, 'ui_pipeline.log')
-    status_file = os.path.join(harvester_dir, 'ui_status.json')
-
-    while _pipeline_status["running"]:
-        # Read log lines
-        try:
-            with open(log_file) as f:
-                lines = [l.rstrip() for l in f.readlines() if l.strip()]
-            _pipeline_status["log"] = lines[-200:]
-        except Exception:
-            pass
-
-        # Read step from status file
-        try:
-            with open(status_file) as f:
-                st = json.load(f)
-            _pipeline_status["step"] = st.get("step", _pipeline_status["step"])
-            if not st.get("running", True):
-                _pipeline_status["running"] = False
-                _pipeline_status["step"] = st.get("step", "Complete")
-        except Exception:
-            pass
-
-        import time
-        time.sleep(2)
-
-
 def _run_pipeline(start_date, end_date, zenrows_key):
     """Writes a job file for the host-side pipeline_runner.sh service to pick up."""
     from datetime import datetime
-
     harvester_dir = os.environ.get('HARVESTER_DIR', '/opt/caseharvester')
     job_file    = os.path.join(harvester_dir, 'ui_job.json')
     log_file    = os.path.join(harvester_dir, 'ui_pipeline.log')
@@ -90,7 +85,7 @@ def _run_pipeline(start_date, end_date, zenrows_key):
     _pipeline_status["last_start_date"] = start_date
     _pipeline_status["last_end_date"] = end_date or "today"
 
-    # Clear old log and status
+    # Clear old log and status so UI starts fresh
     try:
         open(log_file, 'w').close()
         with open(status_file, 'w') as f:
@@ -98,15 +93,9 @@ def _run_pipeline(start_date, end_date, zenrows_key):
     except Exception:
         pass
 
-    # Write job file — the host runner picks this up within 2 seconds
-    job = {"start_date": start_date, "end_date": end_date, "zenrows_key": zenrows_key}
+    # Write job file — host runner picks this up within 2 seconds
     with open(job_file, 'w') as f:
-        json.dump(job, f)
-
-    # Start polling thread to sync log/status into _pipeline_status
-    import threading
-    t = threading.Thread(target=_poll_pipeline, daemon=True)
-    t.start()
+        json.dump({"start_date": start_date, "end_date": end_date, "zenrows_key": zenrows_key}, f)
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
@@ -199,13 +188,7 @@ def run_pipeline():
     if not start_date:
         return jsonify({"error": "start_date required (MM/DD/YYYY)"}), 400
 
-    thread = threading.Thread(
-        target=_run_pipeline,
-        args=(start_date, end_date, zenrows_key),
-        daemon=True
-    )
-    thread.start()
-
+    _run_pipeline(start_date, end_date, zenrows_key)
     return jsonify({"ok": True, "message": "Pipeline started"})
 
 
