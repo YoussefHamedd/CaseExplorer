@@ -166,7 +166,7 @@ export default function Admin() {
       </p>
 
       {/* DB Stats */}
-      <div style={{ display: 'flex', gap: 16, marginBottom: 30, flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', gap: 16, marginBottom: 16, flexWrap: 'wrap' }}>
         <StatCard label="Total Cases" value={db.total} />
         <StatCard label="Scraped" value={db.scraped}
           sub={pct(db.scraped, db.total) + '% of total'} color="#2980b9" />
@@ -176,6 +176,47 @@ export default function Admin() {
         <StatCard label="Remaining" value={db.remaining}
           color={db.remaining > 0 ? '#e74c3c' : '#27ae60'} />
       </div>
+
+      {/* Resume Banner */}
+      {db.last_scraped_filing_date && (
+        <div style={{
+          background: '#eaf4fb', border: '1px solid #aed6f1', borderRadius: 10,
+          padding: '14px 20px', marginBottom: 24, display: 'flex',
+          alignItems: 'center', gap: 20, flexWrap: 'wrap'
+        }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 700, fontSize: 14, color: '#1a5276', marginBottom: 6 }}>
+              Where to resume your next ZenRows account
+            </div>
+            <div style={{ fontSize: 13, color: '#333', lineHeight: 1.8 }}>
+              <span style={{ marginRight: 24 }}>
+                Scraped range:{' '}
+                <strong>{db.first_scraped_filing_date || '?'}</strong>
+                {' '}&rarr;{' '}
+                <strong>{db.last_scraped_filing_date}</strong>
+              </span>
+              {db.oldest_unscraped_filing_date && (
+                <span>
+                  Next unscraped:{' '}
+                  <strong style={{ color: '#e74c3c' }}>{db.oldest_unscraped_filing_date}</strong>
+                </span>
+              )}
+            </div>
+          </div>
+          {db.oldest_unscraped_filing_date && (
+            <button
+              style={Object.assign({}, btnPrimary, { background: '#1a5276', whiteSpace: 'nowrap' })}
+              onClick={function() {
+                // Convert MM/DD/YYYY → YYYY-MM-DD for the date input
+                var parts = db.oldest_unscraped_filing_date.split('/');
+                setStartDate(parts[2] + '-' + parts[0] + '-' + parts[1]);
+                setEndDate('');
+              }}>
+              Resume from {db.oldest_unscraped_filing_date}
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Two column layout */}
       <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
@@ -297,6 +338,14 @@ export default function Admin() {
                   <span style={{ fontSize: 12, color: '#888' }}>Last run: </span>
                   <span style={{ fontSize: 12, color: '#555' }}>
                     {new Date(pipe.last_run + 'Z').toLocaleString()}
+                  </span>
+                </div>
+              )}
+              {pipe.last_start_date && (
+                <div>
+                  <span style={{ fontSize: 12, color: '#888' }}>Last range: </span>
+                  <span style={{ fontSize: 12, color: '#555' }}>
+                    {pipe.last_start_date} &rarr; {pipe.last_end_date || 'today'}
                   </span>
                 </div>
               )}

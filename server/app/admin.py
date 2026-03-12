@@ -18,6 +18,8 @@ _pipeline_status = {
     "step": None,
     "log": [],
     "last_run": None,
+    "last_start_date": None,
+    "last_end_date": None,
 }
 
 SETTINGS_FILE = os.path.join(os.path.dirname(__file__), 'admin_settings.json')
@@ -50,6 +52,8 @@ def _run_pipeline(start_date, end_date, zenrows_key):
     _pipeline_status["running"] = True
     _pipeline_status["log"] = []
     _pipeline_status["last_run"] = datetime.utcnow().isoformat()
+    _pipeline_status["last_start_date"] = start_date
+    _pipeline_status["last_end_date"] = end_date or "today"
 
     # Write key to env file so harvester.py picks it up
     env_file = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'CaseHarvester', 'env', 'production.env')
@@ -138,13 +142,38 @@ def save_settings():
 def get_status():
     with db_session() as db:
         try:
-            total     = db.execute(text("SELECT COUNT(*) FROM cases")).scalar()
-            scraped   = db.execute(text("SELECT COUNT(*) FROM cases WHERE last_scrape IS NOT NULL")).scalar()
-            parsed    = db.execute(text("SELECT COUNT(*) FROM cases WHERE last_parse IS NOT NULL")).scalar()
-            remaining = db.execute(text("SELECT COUNT(*) FROM cases WHERE last_scrape IS NULL AND scrape_exempt = false")).scalar()
+            total        = db.execute(text("SELECT COUNT(*) FROM cases")).scalar()
+            scraped      = db.execute(text("SELECT COUNT(*) FROM cases WHERE last_scrape IS NOT NULL")).scalar()
+            parsed       = db.execute(text("SELECT COUNT(*) FROM cases WHERE last_parse IS NOT NULL")).scalar()
+            remaining    = db.execute(text("SELECT COUNT(*) FROM cases WHERE last_scrape IS NULL AND scrape_exempt = false")).scalar()
             foreclosures = db.execute(text("SELECT COUNT(*) FROM cases WHERE case_type ILIKE '%foreclosure%' AND last_scrape IS NOT NULL")).scalar()
+
+            # Last filing date that was fully scraped — resume NEXT run from the day after this
+            last_scraped_filing = db.execute(text(
+                "SELECT MAX(filing_date) FROM cases WHERE last_scrape IS NOT NULL"
+            )).scalar()
+
+            # Oldest filing date not yet scraped — the earliest gap
+            oldest_unscraped = db.execute(text(
+                "SELECT MIN(filing_date) FROM cases WHERE last_scrape IS NULL AND scrape_exempt = false"
+            )).scalar()
+
+            # Date range that has been scraped (min → max)
+            first_scraped_filing = db.execute(text(
+                "SELECT MIN(filing_date) FROM cases WHERE last_scrape IS NOT NULL"
+            )).scalar()
+
         except Exception:
             total = scraped = parsed = remaining = foreclosures = 0
+            last_scraped_filing = oldest_unscraped = first_scraped_filing = None
+
+    def fmt_date(d):
+        if d is None:
+            return None
+        try:
+            return d.strftime('%m/%d/%Y')
+        except Exception:
+            return str(d)
 
     return jsonify({
         "pipeline": _pipeline_status,
@@ -154,6 +183,9 @@ def get_status():
             "parsed": parsed,
             "remaining": remaining,
             "foreclosures_scraped": foreclosures,
+            "last_scraped_filing_date": fmt_date(last_scraped_filing),
+            "first_scraped_filing_date": fmt_date(first_scraped_filing),
+            "oldest_unscraped_filing_date": fmt_date(oldest_unscraped),
         }
     })
 
