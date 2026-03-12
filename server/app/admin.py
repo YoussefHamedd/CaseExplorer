@@ -85,7 +85,10 @@ def _run_pipeline(start_date, end_date, zenrows_key):
             _log(f"[{step_name}] ERROR: {e}")
             return False
 
-    py = sys.executable
+    # Use CaseHarvester's own venv which has all deps installed
+    venv_python = os.path.join(harvester_dir, "venv", "bin", "python3")
+    py = venv_python if os.path.exists(venv_python) else sys.executable
+    _log(f"[Init] Using Python: {py}")
     base_cmd = [py, "harvester.py", "--environment", "production"]
 
     try:
