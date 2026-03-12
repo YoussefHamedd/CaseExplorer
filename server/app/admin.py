@@ -63,12 +63,24 @@ def _run_pipeline(start_date, end_date, zenrows_key):
     if zenrows_key:
         env["ZENROWS_KEY"] = zenrows_key
 
-    def run_step(step_name, cmd):
+    venv_activate = os.path.join(harvester_dir, "venv", "bin", "activate")
+    _log(f"[Init] harvester_dir={harvester_dir}")
+    _log(f"[Init] venv activate={venv_activate}, exists={os.path.exists(venv_activate)}")
+
+    def run_step(step_name, harvester_args):
         _pipeline_status["step"] = step_name
         _log(f"[{step_name}] Starting...")
+        # Build the full shell command — activate venv then run harvester
+        args_str = " ".join(harvester_args)
+        shell_cmd = (
+            f"cd {harvester_dir} && "
+            f"source {venv_activate} && "
+            f"python3 harvester.py --environment production {args_str}"
+        )
         try:
             result = subprocess.run(
-                cmd, cwd=harvester_dir, env=env,
+                ["bash", "-c", shell_cmd],
+                cwd=harvester_dir, env=env,
                 capture_output=True, text=True, timeout=3600
             )
             for line in (result.stdout + result.stderr).splitlines():
@@ -85,29 +97,23 @@ def _run_pipeline(start_date, end_date, zenrows_key):
             _log(f"[{step_name}] ERROR: {e}")
             return False
 
-    # Use CaseHarvester's own venv which has all deps installed
-    venv_python = os.path.join(harvester_dir, "venv", "bin", "python3")
-    py = venv_python if os.path.exists(venv_python) else sys.executable
-    _log(f"[Init] Using Python: {py}")
-    base_cmd = [py, "harvester.py", "--environment", "production"]
-
     try:
         # Step 1: Spider
-        spider_cmd = base_cmd + ["spider", "--start-date", start_date]
+        spider_args = ["spider", "--start-date", start_date]
         if end_date:
-            spider_cmd += ["--end-date", end_date]
-        if not run_step("Spider", spider_cmd):
+            spider_args += ["--end-date", end_date]
+        if not run_step("Spider", spider_args):
             return
 
         # Step 2: Queue unscraped
-        run_step("Queue", base_cmd + ["scraper", "--stale", "--include-unscraped"])
+        run_step("Queue", ["scraper", "--stale", "--include-unscraped"])
 
         # Step 3: Scrape
-        if not run_step("Scraper", base_cmd + ["scraper", "--from-queue"]):
+        if not run_step("Scraper", ["scraper", "--from-queue"]):
             return
 
         # Step 4: Parse
-        run_step("Parser", base_cmd + ["parser", "--queue", "--parallel"])
+        run_step("Parser", ["parser", "--queue", "--parallel"])
 
         _pipeline_status["step"] = "Complete"
         _log("Pipeline finished successfully.")
