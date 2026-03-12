@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 const API = '/api/v1/admin';
 
 // ── small helpers ─────────────────────────────────────────────────────────────
-const fmt = n => (n ?? 0).toLocaleString();
+const fmt = n => (n != null ? n : 0).toLocaleString();
 const pct = (a, b) => (b ? ((a / b) * 100).toFixed(1) : '0.0');
 
 function StatCard({ label, value, sub, color }) {
