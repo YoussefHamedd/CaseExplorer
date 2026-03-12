@@ -11,6 +11,7 @@ from .utils import configure_logging
 from .graphqlapi import GraphQL
 from .api import RESTAPI
 from .service import DataService
+from .admin import admin_bp
 
 db = SQLAlchemy()
 graphql_service = GraphQL()
@@ -45,6 +46,9 @@ def create_app(config_name):
     graphql_service.init_app(app)  # Must be after db initialization
     rest_api.init_app(app)
     data_service.init_app(app)
+
+    # Admin blueprint
+    app.register_blueprint(admin_bp)
 
     # Commands
     app.cli.add_command(commands.print_graphql_schema)

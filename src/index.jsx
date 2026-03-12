@@ -19,6 +19,7 @@ import { useEffect } from 'react';
 import SwaggerUI from 'swagger-ui-react';
 import 'swagger-ui-react/swagger-ui.css';
 import { CookiesProvider } from 'react-cookie';
+import Admin from './Admin';
 
 export const version = '0.3';
 
@@ -48,6 +49,8 @@ const getTitle = metadata => {
     title = 'All Cases';
   } else if (table === 'rest') {
     title = 'REST API';
+  } else if (table === 'admin') {
+    title = 'Harvest & Scrape Admin';
   } else if (table === 'graphql') {
     title = 'GraphQL API';
   } else if (table === 'bail') {
@@ -165,6 +168,9 @@ const App = props => {
               />
               <Route path="/rest" key="/rest">
                 <SwaggerUI url="/swagger.json" />
+              </Route>
+              <Route path="/admin" key="/admin">
+                <Admin />
               </Route>
               {genRoutes(metadata)}
             </Switch>

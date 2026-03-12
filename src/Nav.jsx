@@ -52,13 +52,17 @@ let navLinkGroups = [
     key: 'API',
     links: [
       { name: 'GraphQL', url: '/graphql', key: 'graphql' },
-      {
-        name: 'REST',
-        key: 'REST',
-        url: '/rest'
-      }
+      { name: 'REST', key: 'REST', url: '/rest' }
     ],
     isExpanded: false
+  },
+  {
+    name: 'Admin',
+    key: 'Admin',
+    links: [
+      { name: 'Harvest & Scrape', url: '/admin', key: 'admin' }
+    ],
+    isExpanded: true
   }
 ];
 
