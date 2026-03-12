@@ -9,7 +9,6 @@ import subprocess
 import threading
 import os
 import json
-import requests as http_requests
 
 admin_bp = Blueprint('admin', __name__, url_prefix='/api/v1/admin')
 
