@@ -55,9 +55,8 @@ def _run_pipeline(start_date, end_date, zenrows_key):
     _pipeline_status["last_start_date"] = start_date
     _pipeline_status["last_end_date"] = end_date or "today"
 
-    # Write key to env file so harvester.py picks it up
-    env_file = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'CaseHarvester', 'env', 'production.env')
-    harvester_dir = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'CaseHarvester')
+    # CaseHarvester is mounted into the container at /opt/caseharvester
+    harvester_dir = os.environ.get('HARVESTER_DIR', '/opt/caseharvester')
 
     # Inject the ZenRows key into the environment
     env = os.environ.copy()
