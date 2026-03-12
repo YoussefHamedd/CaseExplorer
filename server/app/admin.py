@@ -5,7 +5,6 @@ and manage their ZenRows API key without touching the server directly.
 from flask import Blueprint, request, jsonify
 from sqlalchemy import text
 from .utils import db_session
-import subprocess
 import threading
 import os
 import json
@@ -44,81 +43,70 @@ def _log(msg):
         _pipeline_status["log"] = _pipeline_status["log"][-200:]
 
 
+def _poll_pipeline():
+    """Background thread: reads host-side log + status files and syncs into _pipeline_status."""
+    from datetime import datetime
+    harvester_dir = os.environ.get('HARVESTER_DIR', '/opt/caseharvester')
+    log_file    = os.path.join(harvester_dir, 'ui_pipeline.log')
+    status_file = os.path.join(harvester_dir, 'ui_status.json')
+
+    while _pipeline_status["running"]:
+        # Read log lines
+        try:
+            with open(log_file) as f:
+                lines = [l.rstrip() for l in f.readlines() if l.strip()]
+            _pipeline_status["log"] = lines[-200:]
+        except Exception:
+            pass
+
+        # Read step from status file
+        try:
+            with open(status_file) as f:
+                st = json.load(f)
+            _pipeline_status["step"] = st.get("step", _pipeline_status["step"])
+            if not st.get("running", True):
+                _pipeline_status["running"] = False
+                _pipeline_status["step"] = st.get("step", "Complete")
+        except Exception:
+            pass
+
+        import time
+        time.sleep(2)
+
+
 def _run_pipeline(start_date, end_date, zenrows_key):
-    """Runs spider → scraper → parser in a background thread."""
-    import sys
+    """Writes a job file for the host-side pipeline_runner.sh service to pick up."""
     from datetime import datetime
 
+    harvester_dir = os.environ.get('HARVESTER_DIR', '/opt/caseharvester')
+    job_file    = os.path.join(harvester_dir, 'ui_job.json')
+    log_file    = os.path.join(harvester_dir, 'ui_pipeline.log')
+    status_file = os.path.join(harvester_dir, 'ui_status.json')
+
     _pipeline_status["running"] = True
-    _pipeline_status["log"] = []
+    _pipeline_status["log"] = ["Submitting job to host runner..."]
+    _pipeline_status["step"] = "Pending"
     _pipeline_status["last_run"] = datetime.utcnow().isoformat()
     _pipeline_status["last_start_date"] = start_date
     _pipeline_status["last_end_date"] = end_date or "today"
 
-    # CaseHarvester is mounted into the container at /opt/caseharvester
-    harvester_dir = os.environ.get('HARVESTER_DIR', '/opt/caseharvester')
-
-    # Inject the ZenRows key into the environment
-    env = os.environ.copy()
-    if zenrows_key:
-        env["ZENROWS_KEY"] = zenrows_key
-
-    venv_activate = os.path.join(harvester_dir, "venv", "bin", "activate")
-    _log(f"[Init] harvester_dir={harvester_dir}")
-    _log(f"[Init] venv activate={venv_activate}, exists={os.path.exists(venv_activate)}")
-
-    def run_step(step_name, harvester_args):
-        _pipeline_status["step"] = step_name
-        _log(f"[{step_name}] Starting...")
-        # Build the full shell command — activate venv then run harvester
-        args_str = " ".join(harvester_args)
-        shell_cmd = (
-            f"cd {harvester_dir} && "
-            f"source {venv_activate} && "
-            f"python3 harvester.py --environment production {args_str}"
-        )
-        try:
-            result = subprocess.run(
-                ["bash", "-c", shell_cmd],
-                cwd=harvester_dir, env=env,
-                capture_output=True, text=True, timeout=3600
-            )
-            for line in (result.stdout + result.stderr).splitlines():
-                _log(f"[{step_name}] {line}")
-            if result.returncode != 0:
-                _log(f"[{step_name}] FAILED (exit {result.returncode})")
-                return False
-            _log(f"[{step_name}] Done.")
-            return True
-        except subprocess.TimeoutExpired:
-            _log(f"[{step_name}] TIMEOUT after 1 hour")
-            return False
-        except Exception as e:
-            _log(f"[{step_name}] ERROR: {e}")
-            return False
-
+    # Clear old log and status
     try:
-        # Step 1: Spider
-        spider_args = ["spider", "--start-date", start_date]
-        if end_date:
-            spider_args += ["--end-date", end_date]
-        if not run_step("Spider", spider_args):
-            return
+        open(log_file, 'w').close()
+        with open(status_file, 'w') as f:
+            json.dump({"running": True, "step": "Pending"}, f)
+    except Exception:
+        pass
 
-        # Step 2: Queue unscraped
-        run_step("Queue", ["scraper", "--stale", "--include-unscraped"])
+    # Write job file — the host runner picks this up within 2 seconds
+    job = {"start_date": start_date, "end_date": end_date, "zenrows_key": zenrows_key}
+    with open(job_file, 'w') as f:
+        json.dump(job, f)
 
-        # Step 3: Scrape
-        if not run_step("Scraper", ["scraper", "--from-queue"]):
-            return
-
-        # Step 4: Parse
-        run_step("Parser", ["parser", "--queue", "--parallel"])
-
-        _pipeline_status["step"] = "Complete"
-        _log("Pipeline finished successfully.")
-    finally:
-        _pipeline_status["running"] = False
+    # Start polling thread to sync log/status into _pipeline_status
+    import threading
+    t = threading.Thread(target=_poll_pipeline, daemon=True)
+    t.start()
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
@@ -223,8 +211,12 @@ def run_pipeline():
 
 @admin_bp.route('/stop', methods=['POST'])
 def stop_pipeline():
-    # Mark as stopped — running subprocess can't be killed easily,
-    # but spider/scraper check for Forbidden and stop themselves.
+    harvester_dir = os.environ.get('HARVESTER_DIR', '/opt/caseharvester')
+    # Remove pending job file so the runner doesn't start it
+    try:
+        os.remove(os.path.join(harvester_dir, 'ui_job.json'))
+    except Exception:
+        pass
     _pipeline_status["running"] = False
     _pipeline_status["step"] = "Stopped"
     return jsonify({"ok": True})
