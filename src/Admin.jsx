@@ -1,426 +1,496 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 
-var API = '/api/v1/admin';
+var STATUS_API = '/api/v1/admin/status';
+var HEALTH_API = '/api/v1/admin/spider-health';
 
-function fmt(n) { return (n != null ? n : 0).toLocaleString(); }
-function pct(a, b) { return b ? ((a / b) * 100).toFixed(1) : '0.0'; }
-function safe(obj, key) { return obj && obj[key] != null ? obj[key] : null; }
+function fmt(n) {
+  return (n != null ? n : 0).toLocaleString();
+}
+function pct(a, b) {
+  return b ? Math.min(100, (a / b) * 100).toFixed(1) : '0.0';
+}
 
-function StatCard(props) {
+function SectionLabel({ title }) {
   return (
-    <div style={{
-      background: '#fff', borderRadius: 10, padding: '18px 24px',
-      boxShadow: '0 2px 8px rgba(0,0,0,.08)', minWidth: 160, flex: 1
-    }}>
-      <div style={{ fontSize: 13, color: '#888', marginBottom: 4 }}>{props.label}</div>
-      <div style={{ fontSize: 28, fontWeight: 700, color: props.color || '#222' }}>{fmt(props.value)}</div>
-      {props.sub && <div style={{ fontSize: 12, color: '#aaa', marginTop: 4 }}>{props.sub}</div>}
+    <div
+      style={{
+        fontSize: 11,
+        fontWeight: 700,
+        color: '#aaa',
+        letterSpacing: 1.2,
+        textTransform: 'uppercase',
+        marginBottom: 10,
+        marginTop: 22
+      }}
+    >
+      {title}
     </div>
   );
 }
 
-function ProgressBar(props) {
-  var p = props.total ? Math.min(100, (props.value / props.total) * 100) : 0;
+function StatCard({ label, value, color, sub }) {
   return (
-    <div style={{ marginBottom: 10 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#555', marginBottom: 4 }}>
-        <span>{props.label}</span>
-        <span>{fmt(props.value)} / {fmt(props.total)} ({p.toFixed(1)}%)</span>
+    <div
+      style={{
+        background: '#fff',
+        borderRadius: 10,
+        padding: '16px 20px',
+        boxShadow: '0 1px 6px rgba(0,0,0,.07)',
+        flex: 1,
+        minWidth: 100
+      }}
+    >
+      <div
+        style={{
+          fontSize: 11,
+          color: '#aaa',
+          fontWeight: 600,
+          letterSpacing: 0.8,
+          textTransform: 'uppercase',
+          marginBottom: 6
+        }}
+      >
+        {label}
       </div>
-      <div style={{ background: '#eee', borderRadius: 4, height: 8 }}>
-        <div style={{ width: p + '%', background: props.color, height: 8, borderRadius: 4, transition: 'width .4s' }} />
+      <div
+        style={{
+          fontSize: 26,
+          fontWeight: 700,
+          color: color || '#222',
+          lineHeight: 1.1
+        }}
+      >
+        {value != null ? value : '—'}
+      </div>
+      {sub && (
+        <div style={{ fontSize: 12, color: '#aaa', marginTop: 4 }}>{sub}</div>
+      )}
+    </div>
+  );
+}
+
+function QueueCard({ label, value, color, sub }) {
+  return (
+    <div
+      style={{
+        background: '#fff',
+        borderRadius: 10,
+        padding: '16px 20px',
+        boxShadow: '0 1px 6px rgba(0,0,0,.07)',
+        flex: 1,
+        minWidth: 100
+      }}
+    >
+      <div
+        style={{
+          fontSize: 11,
+          color: '#aaa',
+          fontWeight: 600,
+          letterSpacing: 0.8,
+          textTransform: 'uppercase',
+          marginBottom: 6
+        }}
+      >
+        {label}
+      </div>
+      <div style={{ fontSize: 28, fontWeight: 700, color: color || '#222' }}>
+        {value != null ? fmt(value) : '—'}
+      </div>
+      {sub && (
+        <div style={{ fontSize: 12, color: '#aaa', marginTop: 4 }}>{sub}</div>
+      )}
+    </div>
+  );
+}
+
+function Bar({ label, val, total, color, sublabel }) {
+  var p = total ? Math.min(100, (val / total) * 100) : 0;
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          marginBottom: 5,
+          gap: 8
+        }}
+      >
+        <span style={{ fontSize: 13, fontWeight: 600, color: '#444' }}>
+          {label}
+        </span>
+        <span
+          style={{
+            background: color,
+            color: '#fff',
+            fontSize: 11,
+            fontWeight: 700,
+            borderRadius: 10,
+            padding: '1px 8px'
+          }}
+        >
+          {p.toFixed(1)}%
+        </span>
+      </div>
+      <div style={{ background: '#eee', borderRadius: 6, height: 8 }}>
+        <div
+          style={{
+            width: p + '%',
+            height: 8,
+            borderRadius: 6,
+            background: color,
+            transition: 'width .5s'
+          }}
+        />
+      </div>
+      <div style={{ fontSize: 11, color: '#aaa', marginTop: 4 }}>
+        {sublabel || fmt(val) + ' of ' + fmt(total)}
       </div>
     </div>
   );
 }
 
 export default function Admin() {
-  var [settings, setSettings]   = useState({ zenrows_key: '', scraperapi_key: '' });
-  var [keyInput, setKeyInput]   = useState('');
-  var [keySaved, setKeySaved]   = useState(false);
-  var [startDate, setStartDate] = useState('');
-  var [endDate, setEndDate]     = useState('');
-  var [status, setStatus]       = useState(null);
-  var [running, setRunning]     = useState(false);
-  var [error, setError]         = useState('');
+  var [status, setStatus] = useState(null);
+  var [health, setHealth] = useState(null);
+  var [restarting, setRestarting] = useState(false);
 
-  var logRef  = useRef(null);
-  var pollRef = useRef(null);
+  function fetchAll() {
+    fetch(STATUS_API)
+      .then(function(r) {
+        return r.json();
+      })
+      .then(setStatus)
+      .catch(function() {});
+    fetch(HEALTH_API)
+      .then(function(r) {
+        return r.json();
+      })
+      .then(setHealth)
+      .catch(function() {});
+  }
 
   useEffect(function() {
-    fetchSettings();
-    fetchStatus();
+    fetchAll();
+    var t = setInterval(fetchAll, 3000);
+    return function() {
+      clearInterval(t);
+    };
   }, []);
 
-  useEffect(function() {
-    if (running) {
-      pollRef.current = setInterval(fetchStatus, 3000);
-    } else {
-      clearInterval(pollRef.current);
-    }
-    return function() { clearInterval(pollRef.current); };
-  }, [running]);
-
-  var logs = status && status.pipeline ? (status.pipeline.log || []) : [];
-
-  useEffect(function() {
-    if (logRef.current) {
-      logRef.current.scrollTop = logRef.current.scrollHeight;
-    }
-  }, [logs.length]);
-
-  function fetchSettings() {
-    fetch(API + '/settings')
-      .then(function(r) { return r.json(); })
-      .then(function(d) { setSettings(d); })
-      .catch(function() {});
-  }
-
-  function fetchStatus() {
-    fetch(API + '/status')
-      .then(function(r) { return r.json(); })
-      .then(function(d) {
-        setStatus(d);
-        var p = d && d.pipeline;
-        setRunning(p && p.running ? true : false);
-      })
-      .catch(function() {});
-  }
-
-  function saveKey() {
-    if (!keyInput.trim()) return;
-    fetch(API + '/settings', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ zenrows_key: keyInput.trim() })
-    })
-      .then(function(r) { return r.json(); })
+  function restartSpiders() {
+    setRestarting(true);
+    fetch('/api/v1/admin/restart-spider', { method: 'POST' })
       .then(function() {
-        setKeySaved(true);
-        setKeyInput('');
-        fetchSettings();
-        setTimeout(function() { setKeySaved(false); }, 3000);
+        setTimeout(function() {
+          setRestarting(false);
+        }, 3000);
+      })
+      .catch(function() {
+        setRestarting(false);
       });
   }
 
-  function toSlash(d) {
-    if (!d) return '';
-    var parts = d.split('-');
-    return parts[1] + '/' + parts[2] + '/' + parts[0];
-  }
+  var db = status && status.db ? status.db : {};
+  var queues = status && status.queues ? status.queues : {};
+  var disk = status && status.disk ? status.disk : null;
+  var fcSp = status && status.fc_spider ? status.fc_spider : {};
 
-  function startPipeline() {
-    setError('');
-    if (!startDate) { setError('Start date is required.'); return; }
-    fetch(API + '/run', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ start_date: toSlash(startDate), end_date: toSlash(endDate) })
-    })
-      .then(function(r) { return r.json(); })
-      .then(function(d) {
-        if (d.error) setError(d.error);
-        else { setRunning(true); fetchStatus(); }
-      });
-  }
+  var dd = health && health.datadome_2min != null ? health.datadome_2min : null;
+  var ddColor =
+    dd == null ? '#ccc' : dd > 50 ? '#e74c3c' : dd > 10 ? '#f39c12' : '#2ecc71';
 
-  function stopPipeline() {
-    fetch(API + '/stop', { method: 'POST' })
-      .then(function() { setRunning(false); fetchStatus(); });
-  }
-
-  function setPreset(days) {
-    var d = new Date();
-    var s = new Date(d - days * 86400000);
-    setStartDate(s.toISOString().slice(0, 10));
-    setEndDate('');
-  }
-
-  var db   = (status && status.db)       ? status.db       : {};
-  var pipe = (status && status.pipeline) ? status.pipeline : {};
-
-  function stepColor(step) {
-    if (!step) return '#888';
-    if (step === 'Complete') return '#27ae60';
-    if (step === 'Stopped')  return '#e67e22';
-    return '#2980b9';
-  }
-
-  var presets = [
-    { label: 'Last 7 days',   days: 7   },
-    { label: 'Last 30 days',  days: 30  },
-    { label: 'Last 90 days',  days: 90  },
-    { label: 'Last 6 months', days: 180 },
-    { label: 'Last 1 year',   days: 365 },
-    { label: 'Last 2 years',  days: 730 },
-  ];
+  var scrapeRate = db.scraped_last_1h || 0;
+  var diskSub = disk
+    ? disk.used_gb +
+      ' GB used · ' +
+      disk.free_gb +
+      ' GB free of ' +
+      disk.total_gb +
+      ' GB'
+    : null;
 
   return (
-    <div style={{ padding: '30px 40px', fontFamily: 'Segoe UI, sans-serif', maxWidth: 960 }}>
-
-      <h2 style={{ marginTop: 0, marginBottom: 6, fontSize: 22 }}>
-        Harvest &amp; Scrape Pipeline
-      </h2>
-      <p style={{ color: '#666', marginTop: 0, marginBottom: 28, fontSize: 13 }}>
-        Spider MJCS for case numbers, scrape full case pages via ZenRows, then parse into structured DB tables.
-      </p>
-
-      {/* DB Stats */}
-      <div style={{ display: 'flex', gap: 16, marginBottom: 16, flexWrap: 'wrap' }}>
-        <StatCard label="Total Cases" value={db.total} />
-        <StatCard label="Scraped" value={db.scraped}
-          sub={pct(db.scraped, db.total) + '% of total'} color="#2980b9" />
-        <StatCard label="Parsed" value={db.parsed}
-          sub={pct(db.parsed, db.total) + '% of total'} color="#27ae60" />
-        <StatCard label="Foreclosures Scraped" value={db.foreclosures_scraped} color="#8e44ad" />
-        <StatCard label="Remaining" value={db.remaining}
-          color={db.remaining > 0 ? '#e74c3c' : '#27ae60'} />
-      </div>
-
-      {/* Resume Banner */}
-      {db.last_scraped_filing_date && (
-        <div style={{
-          background: '#eaf4fb', border: '1px solid #aed6f1', borderRadius: 10,
-          padding: '14px 20px', marginBottom: 24, display: 'flex',
-          alignItems: 'center', gap: 20, flexWrap: 'wrap'
-        }}>
-          <div style={{ flex: 1 }}>
-            <div style={{ fontWeight: 700, fontSize: 14, color: '#1a5276', marginBottom: 6 }}>
-              Where to resume your next ZenRows account
+    <div
+      style={{
+        padding: '24px 32px',
+        fontFamily: 'Segoe UI, sans-serif',
+        maxWidth: 1100,
+        background: '#f7f8fa',
+        minHeight: '100vh'
+      }}
+    >
+      {/* ── Top bar ── */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 24,
+          marginBottom: 24,
+          background: '#fff',
+          borderRadius: 10,
+          padding: '12px 20px',
+          boxShadow: '0 1px 6px rgba(0,0,0,.07)'
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div
+            style={{
+              width: 10,
+              height: 10,
+              borderRadius: '50%',
+              background: ddColor
+            }}
+          />
+          <div>
+            <div
+              style={{
+                fontSize: 10,
+                color: '#aaa',
+                textTransform: 'uppercase',
+                letterSpacing: 0.8,
+                fontWeight: 600
+              }}
+            >
+              DataDome Blocks
             </div>
-            <div style={{ fontSize: 13, color: '#333', lineHeight: 1.8 }}>
-              <span style={{ marginRight: 24 }}>
-                Scraped range:{' '}
-                <strong>{db.first_scraped_filing_date || '?'}</strong>
-                {' '}&rarr;{' '}
-                <strong>{db.last_scraped_filing_date}</strong>
-              </span>
-              {db.oldest_unscraped_filing_date && (
-                <span>
-                  Next unscraped:{' '}
-                  <strong style={{ color: '#e74c3c' }}>{db.oldest_unscraped_filing_date}</strong>
-                </span>
-              )}
+            <div style={{ fontSize: 13, color: '#555' }}>
+              {dd != null ? dd : '—'}{' '}
+              <span style={{ color: '#aaa' }}>last 2 min</span>
             </div>
           </div>
-          {db.oldest_unscraped_filing_date && (
-            <button
-              style={Object.assign({}, btnPrimary, { background: '#1a5276', whiteSpace: 'nowrap' })}
-              onClick={function() {
-                // Convert MM/DD/YYYY → YYYY-MM-DD for the date input
-                var parts = db.oldest_unscraped_filing_date.split('/');
-                setStartDate(parts[2] + '-' + parts[0] + '-' + parts[1]);
-                setEndDate('');
-              }}>
-              Resume from {db.oldest_unscraped_filing_date}
-            </button>
-          )}
         </div>
-      )}
 
-      {/* Two column layout */}
-      <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
+        <div style={{ width: 1, height: 32, background: '#eee' }} />
 
-        {/* LEFT */}
-        <div style={{ flex: '0 0 380px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div
+            style={{
+              width: 10,
+              height: 10,
+              borderRadius: '50%',
+              background: fcSp.running ? '#2ecc71' : '#ccc'
+            }}
+          />
+          <div>
+            <div
+              style={{
+                fontSize: 10,
+                color: '#aaa',
+                textTransform: 'uppercase',
+                letterSpacing: 0.8,
+                fontWeight: 600
+              }}
+            >
+              FC Enum Spider
+            </div>
+            <div style={{ fontSize: 13, color: '#555' }}>
+              {fcSp.running ? 'Running' : 'Stopped'}
+              {fcSp.current_segment ? ' · ' + fcSp.current_segment : ''}
+            </div>
+          </div>
+        </div>
 
-          {/* API Key */}
-          <div style={card}>
-            <h3 style={cardTitle}>ZenRows API Key</h3>
-            <p style={hint}>
-              Current key:{' '}
-              <code style={{ background: '#f5f5f5', padding: '2px 6px', borderRadius: 4 }}>
-                {settings.zenrows_key || '(not set)'}
-              </code>
-            </p>
-            <p style={hint}>
-              Create a free account at{' '}
-              <a href="https://www.zenrows.com" target="_blank" rel="noreferrer">zenrows.com</a>
-              {' '}(1,000 free requests/account). Paste your key below.
-            </p>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <input
-                type="password"
-                placeholder="Paste new ZenRows API key..."
-                value={keyInput}
-                onChange={function(e) { setKeyInput(e.target.value); }}
-                onKeyDown={function(e) { if (e.key === 'Enter') saveKey(); }}
-                style={inputStyle}
+        <div style={{ marginLeft: 'auto' }}>
+          <button
+            onClick={restartSpiders}
+            disabled={restarting}
+            style={{
+              background: restarting ? '#aaa' : '#e74c3c',
+              color: '#fff',
+              border: 'none',
+              borderRadius: 8,
+              padding: '9px 20px',
+              fontWeight: 700,
+              fontSize: 13,
+              cursor: restarting ? 'default' : 'pointer'
+            }}
+          >
+            {restarting ? 'Restarting…' : '🔄 Restart Spiders'}
+          </button>
+        </div>
+      </div>
+
+      {/* ── DATABASE ── */}
+      <SectionLabel title="Database" />
+      <div
+        style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 4 }}
+      >
+        <StatCard label="Total Cases" value={fmt(db.total)} color="#222" />
+        <StatCard
+          label="Scraped"
+          value={fmt(db.scraped)}
+          color="#2980b9"
+          sub={pct(db.scraped, db.total) + '% of total'}
+        />
+        <StatCard
+          label="Parsed"
+          value={fmt(db.parsed)}
+          color="#27ae60"
+          sub={pct(db.parsed, db.total) + '% of total'}
+        />
+        <StatCard
+          label="FC / ROR 2024+"
+          value={fmt(db.foreclosures_scraped)}
+          color="#8e44ad"
+          sub="foreclosures + redemptions"
+        />
+        <StatCard
+          label="Unscraped"
+          value={fmt(db.remaining)}
+          color={db.remaining > 0 ? '#e74c3c' : '#27ae60'}
+          sub="pending full scrape"
+        />
+      </div>
+
+      {/* ── FC ENUM SPIDER ── */}
+      <SectionLabel title="FC Enum Spider" />
+      <div
+        style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 4 }}
+      >
+        <StatCard
+          label="Cases Found"
+          value={fmt(fcSp.found)}
+          color="#8e44ad"
+          sub="FC + ROR this run"
+        />
+        <StatCard
+          label="Seqs Checked"
+          value={fmt(fcSp.checked)}
+          color="#555"
+          sub="sequences scanned"
+        />
+        <StatCard
+          label="Find Rate"
+          value={
+            fcSp.rate_per_hour != null
+              ? fmt(Math.round(fcSp.rate_per_hour))
+              : '—'
+          }
+          color="#e67e22"
+          sub="FC cases / hour"
+        />
+        <StatCard
+          label="Scraper Queue"
+          value={fmt(queues.scraper)}
+          color="#e67e22"
+          sub="waiting for full scrape"
+        />
+        <StatCard
+          label="Scrape Rate"
+          value={fmt(scrapeRate)}
+          color="#2980b9"
+          sub="scraped / hour"
+        />
+      </div>
+
+      {/* ── ACTIVITY ── */}
+      <SectionLabel title="Scraper Activity" />
+      <div
+        style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 4 }}
+      >
+        <StatCard
+          label="Scraped / 24H"
+          value={fmt(db.scraped_last_24h)}
+          color="#2980b9"
+          sub="cases touched today"
+        />
+        <StatCard
+          label="Latest Filing"
+          value={db.newest_filing_date || '—'}
+          color="#222"
+          sub="most recent scraped"
+        />
+        <StatCard
+          label="Parser Queue"
+          value={fmt(queues.parser)}
+          color="#27ae60"
+          sub="waiting for parse"
+        />
+      </div>
+
+      {/* ── PROGRESS ── */}
+      <div
+        style={{
+          display: 'flex',
+          gap: 16,
+          alignItems: 'flex-start',
+          marginTop: 22
+        }}
+      >
+        <div style={{ flex: 2, minWidth: 0 }}>
+          <div
+            style={{
+              fontSize: 11,
+              fontWeight: 700,
+              color: '#aaa',
+              letterSpacing: 1.2,
+              textTransform: 'uppercase',
+              marginBottom: 10
+            }}
+          >
+            Progress
+          </div>
+          <div
+            style={{
+              background: '#fff',
+              borderRadius: 10,
+              padding: '20px 24px',
+              boxShadow: '0 1px 6px rgba(0,0,0,.07)'
+            }}
+          >
+            <Bar
+              label="Scraped"
+              val={db.scraped}
+              total={db.total}
+              color="#2980b9"
+            />
+            <Bar
+              label="Parsed"
+              val={db.parsed}
+              total={db.total}
+              color="#27ae60"
+            />
+            {disk && (
+              <Bar
+                label="Disk Usage"
+                val={disk.used_gb}
+                total={disk.total_gb}
+                color="#e67e22"
+                sublabel={diskSub}
               />
-              <button onClick={saveKey} style={btnPrimary}>Save</button>
-            </div>
-            {keySaved && <p style={{ color: '#27ae60', fontSize: 12, marginTop: 6 }}>Key saved.</p>}
-          </div>
-
-          {/* Date Range */}
-          <div style={Object.assign({}, card, { marginTop: 20 })}>
-            <h3 style={cardTitle}>Date Range to Scrape</h3>
-            <p style={hint}>Select the filing-date window to spider, scrape, and parse.</p>
-
-            <label style={labelStyle}>
-              Start date <span style={{ color: '#e74c3c' }}>*</span>
-            </label>
-            <input type="date" value={startDate}
-              onChange={function(e) { setStartDate(e.target.value); }}
-              style={inputStyle} />
-
-            <label style={Object.assign({}, labelStyle, { marginTop: 12 })}>
-              End date <span style={{ color: '#888' }}>(optional, defaults to today)</span>
-            </label>
-            <input type="date" value={endDate}
-              onChange={function(e) { setEndDate(e.target.value); }}
-              style={inputStyle} />
-
-            {error && <p style={{ color: '#e74c3c', fontSize: 13, marginTop: 8 }}>{error}</p>}
-
-            <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
-              {!running
-                ? <button onClick={startPipeline} style={Object.assign({}, btnPrimary, { flex: 1 })}>
-                    Start Pipeline
-                  </button>
-                : <button onClick={stopPipeline} style={Object.assign({}, btnDanger, { flex: 1 })}>
-                    Stop
-                  </button>
-              }
-            </div>
-
-            <p style={{ fontSize: 11, color: '#aaa', marginTop: 10 }}>
-              Pipeline: Spider (discover) then Scraper (download via ZenRows) then Parser (extract data)
-            </p>
-          </div>
-
-          {/* Quick presets */}
-          <div style={Object.assign({}, card, { marginTop: 20 })}>
-            <h3 style={cardTitle}>Quick Presets</h3>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
-              {presets.map(function(p) {
-                return (
-                  <button key={p.days} style={btnSecondary}
-                    onClick={function() { setPreset(p.days); }}>
-                    {p.label}
-                  </button>
-                );
-              })}
-            </div>
+            )}
           </div>
         </div>
 
-        {/* RIGHT */}
-        <div style={{ flex: 1, minWidth: 300 }}>
-
-          <div style={card}>
-            <h3 style={cardTitle}>
-              Pipeline Status
-              {running && (
-                <span style={{
-                  marginLeft: 10, display: 'inline-block',
-                  width: 10, height: 10, borderRadius: '50%',
-                  background: '#27ae60', animation: 'pulse 1.2s infinite'
-                }} />
-              )}
-            </h3>
-
-            <div style={{ display: 'flex', gap: 16, marginBottom: 12, flexWrap: 'wrap' }}>
-              <div>
-                <span style={{ fontSize: 12, color: '#888' }}>Status: </span>
-                <span style={{ fontWeight: 600, color: running ? '#27ae60' : '#888' }}>
-                  {running ? 'Running' : 'Idle'}
-                </span>
-              </div>
-              <div>
-                <span style={{ fontSize: 12, color: '#888' }}>Step: </span>
-                <span style={{ fontWeight: 600, color: stepColor(pipe.step) }}>
-                  {pipe.step || '\u2014'}
-                </span>
-              </div>
-              {pipe.last_run && (
-                <div>
-                  <span style={{ fontSize: 12, color: '#888' }}>Last run: </span>
-                  <span style={{ fontSize: 12, color: '#555' }}>
-                    {new Date(pipe.last_run + 'Z').toLocaleString()}
-                  </span>
-                </div>
-              )}
-              {pipe.last_start_date && (
-                <div>
-                  <span style={{ fontSize: 12, color: '#888' }}>Last range: </span>
-                  <span style={{ fontSize: 12, color: '#555' }}>
-                    {pipe.last_start_date} &rarr; {pipe.last_end_date || 'today'}
-                  </span>
-                </div>
-              )}
-            </div>
-
-            <ProgressBar label="Scraped" value={db.scraped} total={db.total} color="#2980b9" />
-            <ProgressBar label="Parsed"  value={db.parsed}  total={db.total} color="#27ae60" />
-
-            <div ref={logRef} style={{
-              background: '#1e1e1e', color: '#d4d4d4', borderRadius: 6,
-              padding: '10px 14px', fontSize: 12, fontFamily: 'monospace',
-              height: 320, overflowY: 'auto', marginTop: 14,
-              whiteSpace: 'pre-wrap', wordBreak: 'break-all'
-            }}>
-              {logs.length === 0
-                ? <span style={{ color: '#666' }}>No output yet. Start the pipeline to see live logs.</span>
-                : logs.map(function(l, i) { return <div key={i}>{l}</div>; })
-              }
-            </div>
-            <p style={{ fontSize: 11, color: '#aaa', margin: '6px 0 0' }}>
-              Logs refresh every 3 seconds while running.
-            </p>
+        <div style={{ flex: 1, minWidth: 180 }}>
+          <div
+            style={{
+              fontSize: 11,
+              fontWeight: 700,
+              color: '#aaa',
+              letterSpacing: 1.2,
+              textTransform: 'uppercase',
+              marginBottom: 10
+            }}
+          >
+            Queues
           </div>
-
-          {/* Rotation instructions */}
-          <div style={Object.assign({}, card, {
-            marginTop: 20, background: '#fffbf0', borderLeft: '4px solid #f39c12'
-          })}>
-            <h3 style={Object.assign({}, cardTitle, { color: '#b7770d' })}>
-              Rotating Free Accounts (to scrape 2 years)
-            </h3>
-            <ol style={{ paddingLeft: 18, fontSize: 13, color: '#555', lineHeight: 1.8 }}>
-              <li>Go to <a href="https://www.zenrows.com" target="_blank" rel="noreferrer">zenrows.com</a> and create a free account (1,000 requests)</li>
-              <li>Copy your API key, paste it above, click Save</li>
-              <li>Pick a date range and click Start Pipeline</li>
-              <li>When the key runs out, create a new ZenRows account</li>
-              <li>Paste the new key and continue from where you left off</li>
-            </ol>
-            <p style={{ fontSize: 12, color: '#888' }}>
-              Each free ZenRows account covers ~1,000 cases. 2 years of foreclosure cases may need 5-50 accounts.
-            </p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <QueueCard
+              label="Scraper Queue"
+              value={queues.scraper}
+              color="#e67e22"
+              sub="cases to download"
+            />
+            <QueueCard
+              label="Parser Queue"
+              value={queues.parser}
+              color="#27ae60"
+              sub="cases to parse"
+            />
           </div>
         </div>
       </div>
-
-      <style>{'\
-        @keyframes pulse {\
-          0%, 100% { opacity: 1; }\
-          50% { opacity: 0.3; }\
-        }\
-      '}</style>
     </div>
   );
 }
-
-var card = {
-  background: '#fff', borderRadius: 10, padding: '20px 24px',
-  boxShadow: '0 2px 8px rgba(0,0,0,.08)'
-};
-var cardTitle  = { margin: '0 0 12px', fontSize: 15, fontWeight: 600 };
-var hint       = { fontSize: 13, color: '#666', margin: '0 0 10px' };
-var labelStyle = { display: 'block', fontSize: 13, color: '#555', marginBottom: 4 };
-var inputStyle = {
-  width: '100%', padding: '8px 12px', borderRadius: 6, border: '1px solid #ddd',
-  fontSize: 14, boxSizing: 'border-box', outline: 'none'
-};
-var btnPrimary = {
-  padding: '9px 18px', background: '#2980b9', color: '#fff',
-  border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600, fontSize: 14
-};
-var btnDanger = {
-  padding: '9px 18px', background: '#e74c3c', color: '#fff',
-  border: 'none', borderRadius: 6, cursor: 'pointer', fontWeight: 600, fontSize: 14
-};
-var btnSecondary = {
-  padding: '6px 12px', background: '#f0f0f0', color: '#333',
-  border: '1px solid #ddd', borderRadius: 6, cursor: 'pointer', fontSize: 12
-};

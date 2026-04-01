@@ -58,6 +58,23 @@ class DataService:
         }
 
     @classmethod
+    def fetch_foreclosure_rows(cls, req):
+        result = fetch_mjcs2_stats(req, case_types=[
+            'Foreclosure', 'Foreclosure - Residential',
+            'Foreclosure - Commercial', 'Foreclosure - In Rem.'
+        ])
+        return {'rows': result['rows'], 'lastRow': result['last_row']}
+
+    @classmethod
+    def fetch_redemption_rows(cls, req):
+        result = fetch_mjcs2_stats(req, case_types=['Right of Redemption'])
+        return {'rows': result['rows'], 'lastRow': result['last_row']}
+
+    @classmethod
+    def fetch_case_stats(cls):
+        return fetch_case_stats_summary()
+
+    @classmethod
     def fetch_rows_orm_eager(cls, table_name, req):
         orm_cls = get_orm_class_by_name(table_name)
         result = fetch_rows_from_model(orm_cls, req, eager=True)
@@ -175,9 +192,6 @@ def fetch_rows_from_model(cls, req, eager=False, total_only=False):
 
     query = get_eager_query(cls) if eager else cls.query
 
-    # For the cases table, only show scraped cases
-    if table.name == 'cases' and 'last_scrape' in table.c:
-        query = query.filter(table.c['last_scrape'].isnot(None))
 
     # query = build_select(table, req)
     query = build_where(query, table, req)
@@ -484,3 +498,290 @@ def build_group_by(query, table, req):
 
 def is_grouping(row_group_cols, group_keys):
     return len(row_group_cols) > len(group_keys)
+
+
+FC_CASE_TYPES = (
+    'Foreclosure', 'Foreclosure - Residential',
+    'Foreclosure - Commercial', 'Foreclosure - In Rem.',
+    'Right of Redemption'
+)
+
+def fetch_foreclosure_active(req, date_from='2024-01-01', date_to='2026-12-31'):
+    """Return foreclosure cases that had ANY activity between date_from and date_to.
+    Activity = filed, hearing, document event, or case_status_date in that range.
+    Older cases still ongoing in courts are included."""
+    start_row = int(req['startRow'])
+    end_row   = int(req['endRow'])
+    page_size = end_row - start_row
+
+    row_group_cols = req.get('rowGroupCols', [])
+    group_keys     = req.get('groupKeys', [])
+    sort_model     = req.get('sortModel', [])
+    filter_model   = req.get('filterModel', {})
+
+    grouping = len(row_group_cols) > len(group_keys)
+
+    type_placeholders = ', '.join([f':ct{i}' for i in range(len(FC_CASE_TYPES))])
+    params = {f'ct{i}': ct for i, ct in enumerate(FC_CASE_TYPES)}
+    params['date_from'] = date_from
+    params['date_to']   = date_to
+
+    if grouping:
+        group_field   = row_group_cols[len(group_keys)]['field']
+        select_clause = f"c.{group_field}, COUNT(*) as count"
+        group_by_clause = f'GROUP BY c.{group_field}'
+    else:
+        select_clause = (
+            'c.case_number, c.case_type, COALESCE(m.case_title, c.caption) as case_title, '
+            'COALESCE(m.court_name, c.court) as court_name, '
+            'm.case_status, m.case_status_date, m.judge_assigned, c.filing_date, '
+            'EXTRACT(YEAR FROM c.filing_date)::int AS filing_year, 1 as count'
+        )
+        group_by_clause = ''
+
+    where_parts = [
+        f'c.case_type IN ({type_placeholders})',
+        'c.filing_date BETWEEN :date_from AND :date_to'
+    ]
+
+    # Group key filters
+    for idx, key in enumerate(group_keys):
+        field = row_group_cols[idx]['field']
+        where_parts.append(f"{field} = :gk{idx}")
+        params[f'gk{idx}'] = key
+
+    # Column filter model
+    for field, filt in filter_model.items():
+        if filt.get('filterType') == 'text' and filt.get('filter'):
+            where_parts.append(f"CAST({field} AS TEXT) ILIKE :f_{field}")
+            params[f'f_{field}'] = f"%{filt['filter']}%"
+        elif filt.get('filterType') == 'date':
+            if filt.get('dateFrom'):
+                where_parts.append(f"{field} >= :fd_{field}")
+                params[f'fd_{field}'] = filt['dateFrom'][:10]
+            if filt.get('dateTo'):
+                where_parts.append(f"{field} <= :fdt_{field}")
+                params[f'fdt_{field}'] = filt['dateTo'][:10]
+
+    where_clause = 'WHERE ' + ' AND '.join(where_parts)
+
+    if sort_model:
+        order_clause = 'ORDER BY ' + ', '.join(
+            f"{s['colId']} {s['sort'].upper()}" for s in sort_model
+        )
+    elif grouping:
+        order_clause = 'ORDER BY count DESC'
+    else:
+        order_clause = 'ORDER BY filing_date DESC'
+
+    sql = text(f"""
+        SELECT {select_clause}
+        FROM cases c
+        LEFT JOIN mjcs2 m ON m.case_number = c.case_number
+        {where_clause}
+        {group_by_clause}
+        {order_clause}
+        LIMIT :lim OFFSET :off
+    """)
+    params['lim'] = page_size + 1
+    params['off'] = start_row
+
+    with db_session() as db:
+        results = list(db.execute(sql, params))
+
+    results_len = len(results)
+    current_last_row = start_row + results_len
+    last_row = current_last_row if current_last_row <= end_row else -1
+    rows = results[:page_size]
+
+    if grouping:
+        group_field = row_group_cols[len(group_keys)]['field']
+        labeled_rows = [{'group_field': r[0], group_field: r[0], 'count': int(r[1])} for r in rows]
+    else:
+        cols = ['case_number', 'case_type', 'case_title', 'court_name',
+                'case_status', 'case_status_date', 'judge_assigned', 'filing_date',
+                'filing_year', 'count']
+        labeled_rows = []
+        for row in rows:
+            labeled_row = {}
+            for i, col in enumerate(cols):
+                val = row[i]
+                if hasattr(val, 'isoformat'):
+                    val = val.isoformat()
+                labeled_row[col] = val
+            labeled_rows.append(labeled_row)
+
+    return {'rows': labeled_rows, 'last_row': last_row}
+
+
+def fetch_mjcs2_stats(req, case_types, date_from=None, date_to=None):
+    start_row = int(req['startRow'])
+    end_row = int(req['endRow'])
+    page_size = end_row - start_row
+
+    row_group_cols = req.get('rowGroupCols', [])
+    group_keys = req.get('groupKeys', [])
+    value_cols = req.get('valueCols', [])
+    sort_model = req.get('sortModel', [])
+    filter_model = req.get('filterModel', {})
+
+    type_placeholders = ', '.join([f':ct{i}' for i in range(len(case_types))])
+    type_params = {f'ct{i}': ct for i, ct in enumerate(case_types)}
+
+    grouping = len(row_group_cols) > len(group_keys)
+
+    if grouping:
+        group_field = row_group_cols[len(group_keys)]['field']
+        select_fields = [group_field, 'COUNT(*) as count']
+        group_by_clause = f'GROUP BY {group_field}'
+    else:
+        select_fields = [
+            'case_number', 'case_type', 'case_title', 'court_name',
+            'case_status', 'case_status_date', 'judge_assigned', 'filing_date',
+            "EXTRACT(YEAR FROM filing_date)::int AS filing_year",
+            '1 as count'
+        ]
+        group_by_clause = ''
+
+    select_clause = ', '.join(select_fields)
+    where_parts = [f'case_type IN ({type_placeholders})']
+    if date_from:
+        where_parts.append('filing_date >= :date_from')
+        type_params['date_from'] = date_from
+    if date_to:
+        where_parts.append('filing_date <= :date_to')
+        type_params['date_to'] = date_to
+    params = dict(type_params)
+
+    # Apply group key filters
+    for idx, key in enumerate(group_keys):
+        field = row_group_cols[idx]['field']
+        where_parts.append(f"{field} = :gk{idx}")
+        params[f'gk{idx}'] = key
+
+    # Apply filter model
+    for field, filt in filter_model.items():
+        if filt.get('filterType') == 'text' and filt.get('filter'):
+            where_parts.append(f"CAST({field} AS TEXT) ILIKE :f_{field}")
+            params[f'f_{field}'] = f"%{filt['filter']}%"
+        elif filt.get('filterType') == 'date':
+            if filt.get('dateFrom'):
+                where_parts.append(f"{field} >= :fd_{field}")
+                params[f'fd_{field}'] = filt['dateFrom'][:10]
+            if filt.get('dateTo'):
+                where_parts.append(f"{field} <= :fdt_{field}")
+                params[f'fdt_{field}'] = filt['dateTo'][:10]
+
+    where_clause = 'WHERE ' + ' AND '.join(where_parts) if where_parts else ''
+
+    order_clause = ''
+    if sort_model:
+        parts = [f"{s['colId']} {s['sort'].upper()}" for s in sort_model]
+        order_clause = 'ORDER BY ' + ', '.join(parts)
+    elif grouping:
+        order_clause = 'ORDER BY count DESC'
+    else:
+        order_clause = 'ORDER BY filing_date DESC'
+
+    limit_val = page_size + 1
+    offset_val = start_row
+
+    sql = text(f"""
+        SELECT {select_clause}
+        FROM cases c
+        LEFT JOIN mjcs2 m ON m.case_number = c.case_number
+        {where_clause}
+        {group_by_clause}
+        {order_clause}
+        LIMIT :lim OFFSET :off
+    """)
+    params['lim'] = limit_val
+    params['off'] = offset_val
+
+    with db_session() as db:
+        results = list(db.execute(sql, params))
+
+    results_len = len(results)
+    current_last_row = start_row + results_len
+    last_row = current_last_row if current_last_row <= end_row else -1
+    rows = results[:page_size]
+
+    if grouping:
+        labeled_rows = [{'group_field': r[0], group_field: r[0], 'count': int(r[1])} for r in rows]
+    else:
+        cols = ['case_number', 'case_type', 'case_title', 'court_name',
+                'case_status', 'case_status_date', 'judge_assigned', 'filing_date',
+                'filing_year', 'count']
+        labeled_rows = []
+        for row in rows:
+            labeled_row = {}
+            for i, col in enumerate(cols):
+                val = row[i]
+                if hasattr(val, 'isoformat'):
+                    val = val.isoformat()
+                labeled_row[col] = val
+            labeled_rows.append(labeled_row)
+
+    return {'rows': labeled_rows, 'last_row': last_row}
+
+
+def fetch_case_stats_summary():
+    with db_session() as db:
+        totals = db.execute(text("""
+            SELECT
+                COUNT(*) AS total,
+                COUNT(*) FILTER (WHERE case_type ILIKE '%foreclos%') AS foreclosures,
+                COUNT(*) FILTER (WHERE case_type = 'Right of Redemption') AS redemption,
+                COUNT(*) FILTER (WHERE case_status ILIKE '%open%' OR case_status ILIKE '%active%') AS open,
+                COUNT(*) FILTER (WHERE case_status ILIKE '%close%' OR case_status ILIKE '%dismiss%') AS closed,
+                COUNT(*) FILTER (WHERE filing_date >= '2025-01-01') AS y2025,
+                COUNT(*) FILTER (WHERE filing_date >= '2026-01-01') AS y2026
+            FROM mjcs2
+        """)).fetchone()
+
+        by_type = db.execute(text("""
+            SELECT case_type, COUNT(*) as count
+            FROM mjcs2
+            WHERE case_type IS NOT NULL
+            GROUP BY case_type
+            ORDER BY count DESC
+            LIMIT 25
+        """)).fetchall()
+
+        by_court = db.execute(text("""
+            SELECT court_name, COUNT(*) as count
+            FROM mjcs2
+            WHERE court_name IS NOT NULL
+            GROUP BY court_name
+            ORDER BY count DESC
+            LIMIT 20
+        """)).fetchall()
+
+        by_year = db.execute(text("""
+            SELECT EXTRACT(YEAR FROM filing_date)::int AS year, COUNT(*) as count
+            FROM mjcs2
+            WHERE filing_date IS NOT NULL
+              AND EXTRACT(YEAR FROM filing_date) >= 2000
+            GROUP BY year
+            ORDER BY year
+        """)).fetchall()
+
+        by_status = db.execute(text("""
+            SELECT case_status, COUNT(*) as count
+            FROM mjcs2
+            WHERE case_status IS NOT NULL
+            GROUP BY case_status
+            ORDER BY count DESC
+        """)).fetchall()
+
+    return {
+        'totals': {
+            'total': totals[0], 'foreclosures': totals[1],
+            'redemption': totals[2], 'open': totals[3],
+            'closed': totals[4], 'y2025': totals[5], 'y2026': totals[6]
+        },
+        'by_type':   [{'case_type': r[0], 'count': r[1]} for r in by_type],
+        'by_court':  [{'court_name': r[0], 'count': r[1]} for r in by_court],
+        'by_year':   [{'year': r[0], 'count': r[1]} for r in by_year],
+        'by_status': [{'case_status': r[0], 'count': r[1]} for r in by_status],
+    }

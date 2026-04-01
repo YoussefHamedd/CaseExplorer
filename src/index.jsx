@@ -6,6 +6,9 @@ import awsmobile from './aws-exports';
 import './index.css';
 import ServerSideGrid from './ServerSideGrid';
 import BailExplorer from './BailExplorer';
+import ForeclosureExplorer from './ForeclosureExplorer';
+import RedemptionExplorer from './RedemptionExplorer';
+import CaseStatsDashboard from './CaseStatsDashboard';
 import CaseRenderer from './CaseDetails';
 import GraphiQLClient from './GraphiQL';
 import { initializeIcons } from '@fluentui/react/lib/Icons';
@@ -55,6 +58,12 @@ const getTitle = metadata => {
     title = 'GraphQL API';
   } else if (table === 'bail') {
     title = 'Bail Statistics';
+  } else if (table === 'foreclosures') {
+    title = 'Foreclosure Explorer';
+  } else if (table === 'redemption') {
+    title = 'Right of Redemption Explorer';
+  } else if (table === 'statistics') {
+    title = 'Case Statistics Dashboard';
   } else if (metadata.tables[table] != null) {
     title = metadata.tables[table].description;
   } else {
@@ -160,6 +169,15 @@ const App = props => {
               </Route>
               <Route path="/bail" key="/bail">
                 <BailExplorer metadata={metadata} />
+              </Route>
+              <Route path="/foreclosures" key="/foreclosures">
+                <ForeclosureExplorer metadata={metadata} />
+              </Route>
+              <Route path="/redemption" key="/redemption">
+                <RedemptionExplorer metadata={metadata} />
+              </Route>
+              <Route path="/statistics" key="/statistics">
+                <CaseStatsDashboard />
               </Route>
               <Route
                 path="/graphql"

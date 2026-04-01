@@ -57,3 +57,4 @@ from .ODYCOSA import (ODYCOSA, ODYCOSAAttorney, ODYCOSADocument, ODYCOSAJudgment
                       ODYCOSAInvolvedParty, ODYCOSAReferenceNumber, ODYCOSACourtSchedule)
 from .ODYCOA import (ODYCOA, ODYCOAAttorney, ODYCOADocument, ODYCOAJudgment,
                       ODYCOAInvolvedParty, ODYCOAReferenceNumber, ODYCOACourtSchedule)
+from .MJCS2 import (MJCS2, MJCS2Defendant, MJCS2InvolvedParty, MJCS2Attorney, MJCS2Charge, MJCS2Hearing, MJCS2Event, MJCS2Judgment, MJCS2ServiceEvent, MJCS2Cause)

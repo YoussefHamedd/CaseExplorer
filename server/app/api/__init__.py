@@ -68,4 +68,24 @@ class RESTAPI:
                 return DataService.fetch_bail_rows(request.parsed_obj)
         api.add_namespace(bail_namespace, path=f'/{root}')
 
+        foreclosure_namespace = Namespace('foreclosure_stats')
+        @foreclosure_namespace.route('/foreclosure_stats')
+        class ForeclosureStatsResource(Resource):
+            @accepts(schema=QueryParams, api=foreclosure_namespace)
+            def post(self):
+                return DataService.fetch_foreclosure_rows(request.parsed_obj)
+        api.add_namespace(foreclosure_namespace, path=f'/{root}')
+
+        redemption_namespace = Namespace('redemption_stats')
+        @redemption_namespace.route('/redemption_stats')
+        class RedemptionStatsResource(Resource):
+            @accepts(schema=QueryParams, api=redemption_namespace)
+            def post(self):
+                return DataService.fetch_redemption_rows(request.parsed_obj)
+        api.add_namespace(redemption_namespace, path=f'/{root}')
+
+        @bp.route(f'/{root}/case_stats')
+        def case_stats():
+            return json.dumps(DataService.fetch_case_stats())
+
         app.register_blueprint(bp)

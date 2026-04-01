@@ -20,22 +20,16 @@ let navLinkGroups = [
     links: [
       { name: 'All Cases', url: '/', key: 'cases' },
       {
-        name: 'MDEC',
-        key: 'MDEC',
-        expandAriaLabel: 'Expand section',
-        collapseAriaLabel: 'Collapse section',
-        isExpanded: true,
-        links: []
+        name: 'Foreclosure Explorer',
+        url: '/foreclosures',
+        key: 'Foreclosure Explorer'
       },
       {
-        name: 'Non-MDEC',
-        key: 'Non-MDEC',
-        expandAriaLabel: 'Expand section',
-        collapseAriaLabel: 'Collapse section',
-        links: [],
-        isExpanded: false
+        name: 'Right of Redemption',
+        url: '/redemption',
+        key: 'Right of Redemption'
       },
-      { name: 'Bail Statistics', url: '/bail', key: 'Bail Statistics' }
+      { name: 'Case Statistics', url: '/statistics', key: 'Case Statistics' }
     ],
     isExpanded: true
   },
@@ -59,9 +53,7 @@ let navLinkGroups = [
   {
     name: 'Admin',
     key: 'Admin',
-    links: [
-      { name: 'Harvest & Scrape', url: '/admin', key: 'admin' }
-    ],
+    links: [{ name: 'Harvest & Scrape', url: '/admin', key: 'admin' }],
     isExpanded: true
   }
 ];
@@ -90,40 +82,6 @@ export const genNavStructure = metadata => {
   let currentTable = getURLLastPart();
   if (currentTable.indexOf('_') !== -1)
     currentTable = currentTable.substring(0, currentTable.indexOf('_'));
-  navLinkGroups[0].links[2].isExpanded =
-    currentTable === '' ||
-    currentTable.substring(0, 3) === 'ody' ||
-    window.location.pathname.split('/')[1] === 'bpd' ||
-    window.location.pathname.split('/')[1] === 'case' ||
-    window.location.pathname.split('/')[1] === 'bail' ||
-    currentTable === 'graphql' ||
-    currentTable === 'rest'
-      ? false
-      : true;
-  // MDEC
-  navLinkGroups[0].links[1].links = [
-    genNavItem(metadata.tables, currentTable, 'odycrim'),
-    genNavItem(metadata.tables, currentTable, 'odytraf'),
-    genNavItem(metadata.tables, currentTable, 'odycivil'),
-    genNavItem(metadata.tables, currentTable, 'odycvcit'),
-    genNavItem(metadata.tables, currentTable, 'odycosa'),
-    genNavItem(metadata.tables, currentTable, 'odycoa')
-  ];
-  // non-MDEC
-  navLinkGroups[0].links[2].links = [
-    genNavItem(metadata.tables, currentTable, 'dscr'),
-    genNavItem(metadata.tables, currentTable, 'dscivil'),
-    genNavItem(metadata.tables, currentTable, 'dscp'),
-    genNavItem(metadata.tables, currentTable, 'dstraf'),
-    genNavItem(metadata.tables, currentTable, 'k'),
-    genNavItem(metadata.tables, currentTable, 'cc'),
-    genNavItem(metadata.tables, currentTable, 'dv'),
-    genNavItem(metadata.tables, currentTable, 'dsk8'),
-    genNavItem(metadata.tables, currentTable, 'pg'),
-    genNavItem(metadata.tables, currentTable, 'pgv'),
-    genNavItem(metadata.tables, currentTable, 'mccr'),
-    genNavItem(metadata.tables, currentTable, 'mcci')
-  ];
 };
 
 const NavBar = props => {
